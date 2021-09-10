@@ -4,12 +4,59 @@
 //
 // Written by Changkun Ou <changkun.de>
 
+// Package chann provides a unified representation of buffered,
+// unbuffered, and unbounded channels in Go.
+//
+// The package is compatible with existing buffered and unbuffered channels.
+// For example, in Go, to create a buffered or unbuffered channel, one
+// uses built-in function `make` to create a channel:
+//
+// 	ch := make(chan int) // unbuffered channel
+// 	// or
+// 	ch := make(chan int, 42) // buffered channel
+//
+// However, all these channels have a finite capacity for caching, and
+// it is impossible to create a channel with unlimited capacity, namely,
+// an unbounded channel.
+//
+// This package provides the ability to create all possible types of
+// channels. To create an unbuffered or a buffered channel:
+//
+// 	ch := chann.New[int](chann.Cap(0)) // unbuffered channel
+// 	// or
+// 	ch := chann.New[int](chann.Cap(42)) // buffered channel
+//
+// More importantly, when the capacity of the channel is unspecified,
+// or provided as negative values, the created channel is an unbounded
+// channel:
+//
+// 	ch := chann.New[int]() // unbounded channel
+// 	// or
+// 	ch := chann.New[int](chann.Cap(-42)) // unbounded channel
+//
+// Furthermore, all channels provides methods to send (In()),
+// receive (Out()), and close (Close()).
+// Two additional methods: ApproxLen and Cap returns the current status
+// of the channel: an approximation of the current length of the channel,
+// as well as the current capacity of the channel.
+//
+// See https://golang.design/research/ultimate-channel to understand
+// the motivation of providing this package and the possible use cases
+// with this package.
 package chann
 
 import "sync/atomic"
 
+// Opt represents an option to configure the created channel. The current possible
+// option is Cap.
 type Opt func(*config)
 
+// Cap is the option to configure the capacity of a creating buffer.
+// if the provided number is 0, Cap configures the creating buffer to a
+// unbuffered channel; if the provided number is a positive integer, then
+// Cap configures the creating buffer to a buffered channel with the given
+// number of capacity  for caching. If n is a negative integer, then it
+// configures the creating channel to become an unbounded channel.
 func Cap(n int) Opt {
 	return func(s *config) {
 		switch {
@@ -26,11 +73,31 @@ func Cap(n int) Opt {
 	}
 }
 
+// Chann is a generic channel abstraction that can be either buffered,
+// unbuffered, or unbounded. To create a new channel, use New to allocate
+// one, and use Cap to configure the capacity of the channel.
 type Chann[T any] struct {
 	in, out chan T
 	cfg     *config
 }
 
+// New returns a Chann that may represent a buffered, an unbuffered or
+// an unbounded channel. To configure the type of the channel, one may
+// pass Cap as the argument of this function.
+//
+// By default, or without specification, the function returns an unbounded
+// channel which has unlimited capacity.
+//
+// 	ch := chann.New[float64]()
+// 	// or
+//  ch := chann.New[float64](chann.Cap(-1))
+//
+// If the chann.Cap specified a non-negative integer, the returned channel
+// is either unbuffered (0) or buffered (positive).
+//
+// Note that although the input arguments are  specified as variadic parameter
+// list, however, the function panics if there is more than one option is
+// provided.
 func New[T any](opts ...Opt) *Chann[T] {
 	cfg := &config{
 		cap: -1, len: 0,
@@ -95,10 +162,22 @@ func New[T any](opts ...Opt) *Chann[T] {
 	}
 	return ch
 }
-func (ch *Chann[T]) In() chan<- T  { return ch.in }
-func (ch *Chann[T]) Out() <-chan T { return ch.out }
-func (ch *Chann[T]) Close()        { close(ch.in) }
 
+// In returns the send channel of the given Chann, which can be used to
+// send values to the channel.
+func (ch *Chann[T]) In() chan<- T { return ch.in }
+
+// Out returns the receive channel of the given Chann, which can be used
+// to receive values from the channel.
+func (ch *Chann[T]) Out() <-chan T { return ch.out }
+
+// Close closesa the channel.
+func (ch *Chann[T]) Close() { close(ch.in) }
+
+// ApproxLen returns an approximation of the length of the channel.
+//
+// Note that in a concurrent scenario, the returned length of a channel
+// may never be accurate. Hence the function is named with an Approx prefix.
 func (ch *Chann[T]) ApproxLen() int {
 	switch ch.cfg.typ {
 	case buffered, unbuffered:
@@ -108,6 +187,7 @@ func (ch *Chann[T]) ApproxLen() int {
 	}
 }
 
+// Cap returns the capacity of the channel.
 func (ch *Chann[T]) Cap() int {
 	switch ch.cfg.typ {
 	case buffered, unbuffered:

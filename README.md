@@ -10,40 +10,30 @@ This package requires Go 1.18.
 
 ## Usage
 
-
-Unbuffered channel:
+Different types of channels:
 
 ```
+ch := chann.New[int]()                           // unbounded, capacity unlimited
 ch := chann.New[func()](chann.Cap(0))            // unbufferd, capacity 0
+ch := chann.New[map[int]float64](chann.Cap(100)) // buffered,  capacity 100
 ```
 
-Unbuffered channel:
-
-```
-ch := chann.New[map[int]float64](chann.Cap(100)) // buffered, capacity 100
-```
-
-Unbounded channel
-
-```
-ch := chann.New[int]() // unbounded, capacity unlimited
-```
-
-Send and receive:
+Send and receive operations:
 
 ```
 ch.In() <- 42
-println(<-ch.Out()) // 42
+<-ch.Out() // 42
 ```
 
-Access properties:
+Channel properties:
 
 ```
-ch.ApproxLen() // the (approx. of) length of the channel
+ch.ApproxLen() // an (approx. of) length of the channel
 ch.Cap()       // the capacity of the channel
 ```
 
-See https://golang.design/research/ultimate-channel for more details of the motivation of this abstraction.
+See https://golang.design/research/ultimate-channel for more details of
+the motivation of this abstraction.
 
 ## License
 

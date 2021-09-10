@@ -1,4 +1,4 @@
-# chann [![PkgGoDev](https://pkg.go.dev/badge/golang.design/x/chann)](https://pkg.go.dev/golang.design/x/chann) ![](https://changkun.de/urlstat?mode=github&repo=golang-design/chann)
+# chann ![example workflow](https://github.com/golang-design/chann/actions/workflows/chann.yml/badge.svg) ![](https://changkun.de/urlstat?mode=github&repo=golang-design/chann)
 
 a unified representation of buffered, unbuffered, and unbounded channels in Go
 

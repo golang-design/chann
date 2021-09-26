@@ -7,13 +7,12 @@
 // Package chann provides a unified representation of buffered,
 // unbuffered, and unbounded channels in Go.
 //
-// The package is compatible with existing buffered and unbuffered channels.
-// For example, in Go, to create a buffered or unbuffered channel, one
-// uses built-in function `make` to create a channel:
+// The package is compatible with existing buffered and unbuffered
+// channels. For example, in Go, to create a buffered or unbuffered
+// channel, one uses built-in function `make` to create a channel:
 //
-// 	ch := make(chan int) // unbuffered channel
-// 	// or
-// 	ch := make(chan int, 42) // buffered channel
+// 	ch := make(chan int)     // unbuffered channel
+// 	ch := make(chan int, 42) // or buffered channel
 //
 // However, all these channels have a finite capacity for caching, and
 // it is impossible to create a channel with unlimited capacity, namely,
@@ -22,20 +21,21 @@
 // This package provides the ability to create all possible types of
 // channels. To create an unbuffered or a buffered channel:
 //
-// 	ch := chann.New[int](chann.Cap(0)) // unbuffered channel
-// 	// or
-// 	ch := chann.New[int](chann.Cap(42)) // buffered channel
+// 	ch := chann.New[int](chann.Cap(0))  // unbuffered channel
+// 	ch := chann.New[int](chann.Cap(42)) // or buffered channel
 //
 // More importantly, when the capacity of the channel is unspecified,
 // or provided as negative values, the created channel is an unbounded
 // channel:
 //
-// 	ch := chann.New[int]() // unbounded channel
-// 	// or
-// 	ch := chann.New[int](chann.Cap(-42)) // unbounded channel
+// 	ch := chann.New[int]()               // unbounded channel
+// 	ch := chann.New[int](chann.Cap(-42)) // or unbounded channel
 //
 // Furthermore, all channels provides methods to send (In()),
 // receive (Out()), and close (Close()).
+//
+// Note that to close a channel, must use Close() method instead of the
+// language built-in method
 // Two additional methods: ApproxLen and Cap returns the current status
 // of the channel: an approximation of the current length of the channel,
 // as well as the current capacity of the channel.
@@ -45,7 +45,9 @@
 // with this package.
 package chann
 
-import "sync/atomic"
+import (
+	"sync/atomic"
+)
 
 // Opt represents an option to configure the created channel. The current possible
 // option is Cap.
@@ -78,6 +80,7 @@ func Cap(n int) Opt {
 // one, and use Cap to configure the capacity of the channel.
 type Chann[T any] struct {
 	in, out chan T
+	close   chan struct{}
 	cfg     *config
 }
 
@@ -121,42 +124,61 @@ func New[T any](opts ...Opt) *Chann[T] {
 	case unbounded:
 		ch.in = make(chan T, 16)
 		ch.out = make(chan T, 16)
+		ch.close = make(chan struct{})
 		ready := make(chan struct{})
+		var nilT T
+
 		go func() {
 			q := make([]T, 0, 1<<10)
 			ready <- struct{}{}
 			for {
-				e, ok := <-ch.in
-				if !ok {
-					close(ch.out)
-					return
+				select {
+				case e, ok := <-ch.in:
+					if !ok {
+						panic("chann: send-only channel ch.In() closed unexpectedly")
+					}
+					atomic.AddInt64(&ch.cfg.len, 1)
+					q = append(q, e)
+				case <-ch.close:
+					goto closed
 				}
-				atomic.AddInt64(&ch.cfg.len, 1)
-				q = append(q, e)
 
 				for len(q) > 0 {
 					select {
 					case ch.out <- q[0]:
 						atomic.AddInt64(&ch.cfg.len, -1)
+						q[0] = nilT
 						q = q[1:]
 					case e, ok := <-ch.in:
-						if ok {
-							atomic.AddInt64(&ch.cfg.len, 1)
-							q = append(q, e)
-							break
+						if !ok {
+							panic("chann: send-only channel ch.In() closed unexpectedly")
 						}
-						for _, e := range q {
-							atomic.AddInt64(&ch.cfg.len, -1)
-							ch.out <- e
-						}
-						close(ch.out)
-						return
+						atomic.AddInt64(&ch.cfg.len, 1)
+						q = append(q, e)
+					case <-ch.close:
+						goto closed
 					}
 				}
 				if cap(q) < 1<<5 {
 					q = make([]T, 0, 1<<10)
 				}
 			}
+
+		closed:
+			close(ch.in)
+			for e := range ch.in {
+				q = append(q, e)
+			}
+			for len(q) > 0 {
+				select {
+				case ch.out <- q[0]:
+					q[0] = nilT // de-reference earlier to help GC
+					q = q[1:]
+				default:
+				}
+			}
+			close(ch.out)
+			close(ch.close)
 		}()
 		<-ready
 	}
@@ -164,15 +186,23 @@ func New[T any](opts ...Opt) *Chann[T] {
 }
 
 // In returns the send channel of the given Chann, which can be used to
-// send values to the channel.
+// send values to the channel. If one closes the channel using close(),
+// it will result in a runtime panic. Instead, use Close() method.
 func (ch *Chann[T]) In() chan<- T { return ch.in }
 
 // Out returns the receive channel of the given Chann, which can be used
 // to receive values from the channel.
 func (ch *Chann[T]) Out() <-chan T { return ch.out }
 
-// Close closesa the channel.
-func (ch *Chann[T]) Close() { close(ch.in) }
+// Close closes the channel gracefully.
+func (ch *Chann[T]) Close() {
+	switch ch.cfg.typ {
+	case buffered, unbuffered:
+		close(ch.in)
+	default:
+		ch.close <- struct{}{}
+	}
+}
 
 // ApproxLen returns an approximation of the length of the channel.
 //

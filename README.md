@@ -2,7 +2,7 @@
 
 a unified representation of buffered, unbuffered, and unbounded channels in Go
 
-```
+```go
 import "golang.design/x/chann"
 ```
 
@@ -12,22 +12,28 @@ This package requires Go 1.18.
 
 Different types of channels:
 
-```
-ch := chann.New[int]()                           // unbounded, capacity unlimited
-ch := chann.New[func()](chann.Cap(0))            // unbufferd, capacity 0
-ch := chann.New[map[int]float64](chann.Cap(100)) // buffered,  capacity 100
+```go
+ch := chann.New[int]()                  // unbounded, capacity unlimited
+ch := chann.New[func()](chann.Cap(0))   // unbufferd, capacity 0
+ch := chann.New[string](chann.Cap(100)) // buffered,  capacity 100
 ```
 
 Send and receive operations:
 
-```
+```go
 ch.In() <- 42
-<-ch.Out() // 42
+println(<-ch.Out()) // 42
+```
+
+Close operation:
+
+```go
+ch.Close()
 ```
 
 Channel properties:
 
-```
+```go
 ch.ApproxLen() // an (approx. of) length of the channel
 ch.Cap()       // the capacity of the channel
 ```

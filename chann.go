@@ -43,7 +43,7 @@
 // See https://golang.design/research/ultimate-channel to understand
 // the motivation of providing this package and the possible use cases
 // with this package.
-package chann
+package chann // import "golang.design/x/chann"
 
 import (
 	"sync/atomic"

@@ -186,14 +186,14 @@ func TestChan(t *testing.T) {
 		{
 			// Test len/cap.
 			c := chann.New[int](chann.Cap(chanCap))
-			if c.ApproxLen() != 0 || c.Cap() != chanCap {
-				t.Fatalf("chan[%d]: bad len/cap, expect %v/%v, got %v/%v", chanCap, 0, chanCap, c.ApproxLen(), c.Cap())
+			if c.Len() != 0 || c.Cap() != chanCap {
+				t.Fatalf("chan[%d]: bad len/cap, expect %v/%v, got %v/%v", chanCap, 0, chanCap, c.Len(), c.Cap())
 			}
 			for i := 0; i < chanCap; i++ {
 				c.In() <- i
 			}
-			if c.ApproxLen() != chanCap || c.Cap() != chanCap {
-				t.Fatalf("chan[%d]: bad len/cap, expect %v/%v, got %v/%v", chanCap, chanCap, chanCap, c.ApproxLen(), c.Cap())
+			if c.Len() != chanCap || c.Cap() != chanCap {
+				t.Fatalf("chan[%d]: bad len/cap, expect %v/%v, got %v/%v", chanCap, chanCap, chanCap, c.Len(), c.Cap())
 			}
 		}
 	}

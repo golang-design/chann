@@ -1,6 +1,6 @@
 # chann ![example workflow](https://github.com/golang-design/chann/actions/workflows/chann.yml/badge.svg) ![](https://changkun.de/urlstat?mode=github&repo=golang-design/chann)
 
-a unified representation of buffered, unbuffered, and unbounded channels in Go
+a unified channel package in Go
 
 ```go
 import "golang.design/x/chann"
@@ -8,7 +8,7 @@ import "golang.design/x/chann"
 
 This package requires Go 1.18.
 
-## Usage
+## Basic Usage
 
 Different types of channels:
 
@@ -34,8 +34,8 @@ ch.Close()
 Channel properties:
 
 ```go
-ch.ApproxLen() // an (approx. of) length of the channel
-ch.Cap()       // the capacity of the channel
+ch.Len() // the length of the channel
+ch.Cap() // the capacity of the channel
 ```
 
 See https://golang.design/research/ultimate-channel for more details of

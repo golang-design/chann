@@ -4,8 +4,7 @@
 //
 // Written by Changkun Ou <changkun.de>
 
-// Package chann provides a unified representation of buffered,
-// unbuffered, and unbounded channels in Go.
+// Package chann providesa a unified channel package.
 //
 // The package is compatible with existing buffered and unbuffered
 // channels. For example, in Go, to create a buffered or unbuffered
@@ -204,11 +203,11 @@ func (ch *Chann[T]) Close() {
 	}
 }
 
-// ApproxLen returns an approximation of the length of the channel.
+// Len returns an approximation of the length of the channel.
 //
 // Note that in a concurrent scenario, the returned length of a channel
 // may never be accurate. Hence the function is named with an Approx prefix.
-func (ch *Chann[T]) ApproxLen() int {
+func (ch *Chann[T]) Len() int {
 	switch ch.cfg.typ {
 	case buffered, unbuffered:
 		return len(ch.in)

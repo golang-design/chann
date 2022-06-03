@@ -245,7 +245,6 @@ func TestNonblockSelectRace(t *testing.T) {
 		c1 := chann.New[int]()
 		c2 := chann.New[int]()
 		c1.In() <- 1
-		time.Sleep(time.Millisecond)
 		go func() {
 			runtime.Gosched()
 			select {
@@ -279,7 +278,6 @@ func TestNonblockSelectRace2(t *testing.T) {
 		c1 := make(chan int, 1)
 		c2 := make(chan int)
 		c1 <- 1
-		time.Sleep(time.Millisecond)
 		go func() {
 			select {
 			case <-c1:

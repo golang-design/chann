@@ -81,6 +81,7 @@ type Chann[T any] struct {
 	in, out chan T
 	close   chan struct{}
 	cfg     *config
+	q       []T
 }
 
 // New returns a Chann that may represent a buffered, an unbuffered or
@@ -123,65 +124,7 @@ func New[T any](opts ...Opt) *Chann[T] {
 	case unbounded:
 		ch.in = make(chan T, 16)
 		ch.out = make(chan T, 16)
-		ready := make(chan struct{})
-		var nilT T
-
-		go func() {
-			q := make([]T, 0, 1<<10)
-			ready <- struct{}{}
-			for {
-				select {
-				case e, ok := <-ch.in:
-					if !ok {
-						panic("chann: send-only channel ch.In() closed unexpectedly")
-					}
-					atomic.AddInt64(&ch.cfg.len, 1)
-					q = append(q, e)
-				case <-ch.close:
-					goto closed
-				}
-
-				for len(q) > 0 {
-					select {
-					case ch.out <- q[0]:
-						atomic.AddInt64(&ch.cfg.len, -1)
-						q[0] = nilT
-						q = q[1:]
-					case e, ok := <-ch.in:
-						if !ok {
-							panic("chann: send-only channel ch.In() closed unexpectedly")
-						}
-						atomic.AddInt64(&ch.cfg.len, 1)
-						q = append(q, e)
-					case <-ch.close:
-						goto closed
-					}
-				}
-				if cap(q) < 1<<5 {
-					q = make([]T, 0, 1<<10)
-				}
-			}
-
-		closed:
-			close(ch.in)
-			for e := range ch.in {
-				q = append(q, e)
-			}
-			for len(q) > 0 {
-				select {
-				case ch.out <- q[0]:
-				// The default branch exists because we need guarantee
-				// the loop can terminate. If there is a receiver, the
-				// first case will ways be selected. See #3.
-				default:
-				}
-				q[0] = nilT // de-reference earlier to help GC
-				q = q[1:]
-			}
-			close(ch.out)
-			close(ch.close)
-		}()
-		<-ready
+		go ch.unboundedProcessing()
 	}
 	return ch
 }
@@ -204,6 +147,73 @@ func (ch *Chann[T]) Close() {
 	default:
 		ch.close <- struct{}{}
 	}
+}
+
+// unboundedProcessing is a processing loop that implements unbounded
+// channel semantics.
+func (ch *Chann[T]) unboundedProcessing() {
+	var nilT T
+
+	ch.q = make([]T, 0, 1<<10)
+	for {
+		select {
+		case e, ok := <-ch.in:
+			if !ok {
+				panic("chann: send-only channel ch.In() closed unexpectedly")
+			}
+			atomic.AddInt64(&ch.cfg.len, 1)
+			ch.q = append(ch.q, e)
+		case <-ch.close:
+			ch.unboundedTerminate()
+			return
+		}
+
+		for len(ch.q) > 0 {
+			select {
+			case ch.out <- ch.q[0]:
+				atomic.AddInt64(&ch.cfg.len, -1)
+				ch.q[0] = nilT
+				ch.q = ch.q[1:]
+			case e, ok := <-ch.in:
+				if !ok {
+					panic("chann: send-only channel ch.In() closed unexpectedly")
+				}
+				atomic.AddInt64(&ch.cfg.len, 1)
+				ch.q = append(ch.q, e)
+			case <-ch.close:
+				ch.unboundedTerminate()
+				return
+			}
+		}
+		if cap(ch.q) < 1<<5 {
+			ch.q = make([]T, 0, 1<<10)
+		}
+	}
+}
+
+// unboundedTerminate terminates the unbounde channel's processing loop
+// and make sure all unprocessed elements either be consumed if there is
+// a pending receiver.
+func (ch *Chann[T]) unboundedTerminate() {
+	var nilT T
+
+	close(ch.in)
+	for e := range ch.in {
+		ch.q = append(ch.q, e)
+	}
+	for len(ch.q) > 0 {
+		select {
+		case ch.out <- ch.q[0]:
+		// The default branch exists because we need guarantee
+		// the loop can terminate. If there is a receiver, the
+		// first case will ways be selected. See #3.
+		default:
+		}
+		ch.q[0] = nilT // de-reference earlier to help GC
+		ch.q = ch.q[1:]
+	}
+	close(ch.out)
+	close(ch.close)
 }
 
 // isClose reports the close status of a channel.

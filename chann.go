@@ -112,7 +112,7 @@ func New[T any](opts ...Opt) *Chann[T] {
 	for _, o := range opts {
 		o(cfg)
 	}
-	ch := &Chann[T]{cfg: cfg}
+	ch := &Chann[T]{cfg: cfg, close: make(chan struct{})}
 	switch ch.cfg.typ {
 	case unbuffered:
 		ch.in = make(chan T)
@@ -123,7 +123,6 @@ func New[T any](opts ...Opt) *Chann[T] {
 	case unbounded:
 		ch.in = make(chan T, 16)
 		ch.out = make(chan T, 16)
-		ch.close = make(chan struct{})
 		ready := make(chan struct{})
 		var nilT T
 
@@ -171,10 +170,13 @@ func New[T any](opts ...Opt) *Chann[T] {
 			for len(q) > 0 {
 				select {
 				case ch.out <- q[0]:
-					q[0] = nilT // de-reference earlier to help GC
-					q = q[1:]
+				// The default branch exists because we need guarantee
+				// the loop can terminate. If there is a receiver, the
+				// first case will ways be selected. See #3.
 				default:
 				}
+				q[0] = nilT // de-reference earlier to help GC
+				q = q[1:]
 			}
 			close(ch.out)
 			close(ch.close)
@@ -198,8 +200,19 @@ func (ch *Chann[T]) Close() {
 	switch ch.cfg.typ {
 	case buffered, unbuffered:
 		close(ch.in)
+		close(ch.close)
 	default:
 		ch.close <- struct{}{}
+	}
+}
+
+// isClose reports the close status of a channel.
+func (ch *Chann[T]) isClosed() bool {
+	select {
+	case <-ch.close:
+		return true
+	default:
+		return false
 	}
 }
 

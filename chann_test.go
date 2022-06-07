@@ -247,7 +247,7 @@ func TestNonblockSelectRace(t *testing.T) {
 		// The input channel of an unbounded buffer have an internal
 		// cache queue. When the input channel and the internal cache
 		// queue both gets full, we are certain that once the next send
-		// is complete, the out will be avaliable for sure hence the
+		// is complete, the out will be available for sure hence the
 		// waiting time of a receive is bounded.
 		for i := 0; i < internalCacheSize; i++ {
 			c1.In() <- 1

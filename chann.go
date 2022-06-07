@@ -84,12 +84,11 @@ type Chann[T any] struct {
 	q       []T
 }
 
-// New returns a Chann that may represent a buffered, an unbuffered or
-// an unbounded channel. To configure the type of the channel, one may
-// pass Cap as the argument of this function.
+// New returns a Chann that may be a buffered, an unbuffered or an
+// unbounded channel. To configure the type of the channel, use Cap.
 //
 // By default, or without specification, the function returns an unbounded
-// channel which has unlimited capacity.
+// channel with unlimited capacity.
 //
 // 	ch := chann.New[float64]()
 // 	// or
@@ -98,7 +97,13 @@ type Chann[T any] struct {
 // If the chann.Cap specified a non-negative integer, the returned channel
 // is either unbuffered (0) or buffered (positive).
 //
-// Note that although the input arguments are  specified as variadic parameter
+// An unbounded channel is not a buffered channel with infinite capacity,
+// and they have different memory model semantics in terms of receiving
+// a value: The recipient of a buffered channel is immediately available
+// after a send is complete. However, the recipient of an unbounded channel
+// may be available within a bounded time frame after a send is complete.
+//
+// Note that although the input arguments are specified as variadic parameter
 // list, however, the function panics if there is more than one option is
 // provided.
 func New[T any](opts ...Opt) *Chann[T] {

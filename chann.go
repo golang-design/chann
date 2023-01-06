@@ -79,6 +79,7 @@ func Cap(n int) Opt {
 // one, and use Cap to configure the capacity of the channel.
 type Chann[T any] struct {
 	in, out chan T
+	backlog chan T
 	close   chan struct{}
 	cfg     *config
 	q       []T
@@ -129,6 +130,7 @@ func New[T any](opts ...Opt) *Chann[T] {
 	case unbounded:
 		ch.in = make(chan T, 16)
 		ch.out = make(chan T, 16)
+		ch.backlog = make(chan T, 1024)
 		go ch.unboundedProcessing()
 	}
 	return ch
@@ -208,14 +210,13 @@ func (ch *Chann[T]) unboundedTerminate() {
 	}
 	for len(ch.q) > 0 {
 		select {
+		// Note if receiver doesn't consume all data that has been sent to input
+		// channel, the `unboundedProcessing` goroutine will leak forever.
+		// Ref: https://github.com/golang-design/chann/issues/3
 		case ch.out <- ch.q[0]:
-		// The default branch exists because we need guarantee
-		// the loop can terminate. If there is a receiver, the
-		// first case will ways be selected. See #3.
-		default:
+			ch.q[0] = nilT // de-reference earlier to help GC
+			ch.q = ch.q[1:]
 		}
-		ch.q[0] = nilT // de-reference earlier to help GC
-		ch.q = ch.q[1:]
 	}
 	close(ch.out)
 	close(ch.close)

@@ -207,13 +207,10 @@ func (ch *Chann[T]) unboundedTerminate() {
 		ch.q = append(ch.q, e)
 	}
 	for len(ch.q) > 0 {
-		select {
-		case ch.out <- ch.q[0]:
-		// The default branch exists because we need guarantee
-		// the loop can terminate. If there is a receiver, the
-		// first case will ways be selected. See #3.
-		default:
-		}
+		// Note if receiver doesn't consume all data that has been sent to input
+		// channel, the `unboundedProcessing` goroutine will leak forever.
+		// Ref: https://github.com/golang-design/chann/issues/3
+		ch.out <- ch.q[0]
 		ch.q[0] = nilT // de-reference earlier to help GC
 		ch.q = ch.q[1:]
 	}

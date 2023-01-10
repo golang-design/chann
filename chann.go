@@ -207,14 +207,12 @@ func (ch *Chann[T]) unboundedTerminate() {
 		ch.q = append(ch.q, e)
 	}
 	for len(ch.q) > 0 {
-		select {
 		// Note if receiver doesn't consume all data that has been sent to input
 		// channel, the `unboundedProcessing` goroutine will leak forever.
 		// Ref: https://github.com/golang-design/chann/issues/3
-		case ch.out <- ch.q[0]:
-			ch.q[0] = nilT // de-reference earlier to help GC
-			ch.q = ch.q[1:]
-		}
+		ch.out <- ch.q[0]
+		ch.q[0] = nilT // de-reference earlier to help GC
+		ch.q = ch.q[1:]
 	}
 	close(ch.out)
 	close(ch.close)

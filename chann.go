@@ -79,7 +79,6 @@ func Cap(n int) Opt {
 // one, and use Cap to configure the capacity of the channel.
 type Chann[T any] struct {
 	in, out chan T
-	backlog chan T
 	close   chan struct{}
 	cfg     *config
 	q       []T
@@ -130,7 +129,6 @@ func New[T any](opts ...Opt) *Chann[T] {
 	case unbounded:
 		ch.in = make(chan T, 16)
 		ch.out = make(chan T, 16)
-		ch.backlog = make(chan T, 1024)
 		go ch.unboundedProcessing()
 	}
 	return ch

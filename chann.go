@@ -45,6 +45,7 @@
 package chann // import "golang.design/x/chann"
 
 import (
+	"runtime"
 	"sync/atomic"
 )
 
@@ -81,7 +82,6 @@ type Chann[T any] struct {
 	in, out chan T
 	close   chan struct{}
 	cfg     *config
-	q       []T
 }
 
 // New returns a Chann that may be a buffered, an unbuffered or an
@@ -129,7 +129,17 @@ func New[T any](opts ...Opt) *Chann[T] {
 	case unbounded:
 		ch.in = make(chan T, 16)
 		ch.out = make(chan T, 16)
-		go ch.unboundedProcessing()
+
+		// released is closed once ch becomes unreachable so that the
+		// processing goroutine can terminate even if there is no
+		// receiver to drain the backlog after Close. The processing
+		// goroutine must NOT close over ch (doing so would keep ch
+		// reachable forever and the cleanup would never run); it only
+		// captures the extracted channels and config below.
+		released := make(chan struct{})
+		runtime.AddCleanup(ch, func(r chan struct{}) { close(r) }, released)
+
+		go unboundedProcessing(ch.in, ch.out, ch.close, released, ch.cfg)
 	}
 	return ch
 }
@@ -156,69 +166,80 @@ func (ch *Chann[T]) Close() {
 
 // unboundedProcessing is a processing loop that implements unbounded
 // channel semantics.
-func (ch *Chann[T]) unboundedProcessing() {
+//
+// It is a free function rather than a method on purpose: it must not
+// capture the owning *Chann, otherwise the running goroutine would keep
+// the Chann reachable forever and the cleanup registered in New would
+// never fire. It only operates on the extracted channels and config.
+func unboundedProcessing[T any](in, out chan T, closed, released chan struct{}, cfg *config) {
 	var nilT T
 
-	ch.q = make([]T, 0, 1<<10)
+	q := make([]T, 0, 1<<10)
 	for {
 		select {
-		case e, ok := <-ch.in:
+		case e, ok := <-in:
 			if !ok {
 				panic("chann: send-only channel ch.In() closed unexpectedly")
 			}
-			atomic.AddInt64(&ch.cfg.len, 1)
-			ch.q = append(ch.q, e)
-		case <-ch.close:
-			ch.unboundedTerminate()
+			atomic.AddInt64(&cfg.len, 1)
+			q = append(q, e)
+		case <-closed:
+			unboundedTerminate(in, out, closed, released, q)
 			return
 		}
 
-		for len(ch.q) > 0 {
+		for len(q) > 0 {
 			select {
-			case ch.out <- ch.q[0]:
-				atomic.AddInt64(&ch.cfg.len, -1)
-				ch.q[0] = nilT
-				ch.q = ch.q[1:]
-			case e, ok := <-ch.in:
+			case out <- q[0]:
+				atomic.AddInt64(&cfg.len, -1)
+				q[0] = nilT
+				q = q[1:]
+			case e, ok := <-in:
 				if !ok {
 					panic("chann: send-only channel ch.In() closed unexpectedly")
 				}
-				atomic.AddInt64(&ch.cfg.len, 1)
-				ch.q = append(ch.q, e)
-			case <-ch.close:
-				ch.unboundedTerminate()
+				atomic.AddInt64(&cfg.len, 1)
+				q = append(q, e)
+			case <-closed:
+				unboundedTerminate(in, out, closed, released, q)
 				return
 			}
 		}
-		if cap(ch.q) < 1<<5 {
-			ch.q = make([]T, 0, 1<<10)
+		if cap(q) < 1<<5 {
+			q = make([]T, 0, 1<<10)
 		}
 	}
 }
 
-// unboundedTerminate terminates the unbounde channel's processing loop
-// and make sure all unprocessed elements either be consumed if there is
-// a pending receiver.
-func (ch *Chann[T]) unboundedTerminate() {
+// unboundedTerminate terminates the unbounded channel's processing loop
+// and makes sure all unprocessed elements are consumed if there is a
+// pending receiver.
+//
+// After Close, the backlog is delivered to out with a blocking send so
+// that no element is dropped while a receiver is draining. If there is
+// no receiver, the send would block forever; the released signal (closed
+// by the cleanup once the owning Chann is garbage collected) lets the
+// goroutine terminate instead of leaking.
+func unboundedTerminate[T any](in, out chan T, closed, released chan struct{}, q []T) {
 	var nilT T
 
-	close(ch.in)
-	for e := range ch.in {
-		ch.q = append(ch.q, e)
+	close(in)
+	for e := range in {
+		q = append(q, e)
 	}
-	for len(ch.q) > 0 {
+	for len(q) > 0 {
 		select {
-		case ch.out <- ch.q[0]:
-		// The default branch exists because we need guarantee
-		// the loop can terminate. If there is a receiver, the
-		// first case will ways be selected. See #3.
-		default:
+		case out <- q[0]:
+			q[0] = nilT // de-reference earlier to help GC
+			q = q[1:]
+		case <-released:
+			goto final
 		}
-		ch.q[0] = nilT // de-reference earlier to help GC
-		ch.q = ch.q[1:]
 	}
-	close(ch.out)
-	close(ch.close)
+
+final:
+	close(out)
+	close(closed)
 }
 
 // isClose reports the close status of a channel.

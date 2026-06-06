@@ -423,24 +423,37 @@ func TestUnboundedChann(t *testing.T) {
 		})
 	}
 }
+func TestUnboundedChannCloseNoReceiver(t *testing.T) {
+	// Closing an unbounded channel that still holds a backlog larger
+	// than the internal out buffer with no receiver must not leak the
+	// processing goroutine. Once the Chann becomes unreachable, the
+	// cleanup registered in New releases the goroutine. See #3.
+	base := runtime.NumGoroutine()
 
-func TestUnboundedChannClose(t *testing.T) {
-	t.Run("close-status", func(t *testing.T) {
-
-		ch := chann.New[any]()
+	func() {
+		ch := chann.New[int]()
 		for i := 0; i < 100; i++ {
-			ch.In() <- 0
+			ch.In() <- i
 		}
 		ch.Close()
+		// no receiver; ch becomes unreachable when this returns.
+	}()
 
-		// Theoretically, this is not a dead loop. If the channel
-		// is closed, then this loop must terminate at somepoint.
-		// If not, we will meet timeout in the test.
-		for !chann.IsClosed(ch) {
-			t.Log("unbounded channel is still not entirely closed")
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		runtime.GC()
+		if runtime.NumGoroutine() <= base {
+			return // processing goroutine terminated, no leak
 		}
-	})
+		if time.Now().After(deadline) {
+			t.Fatalf("processing goroutine leaked after close with no receiver: baseline %d, now %d",
+				base, runtime.NumGoroutine())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
 
+func TestUnboundedChannClose(t *testing.T) {
 	t.Run("struct{}", func(t *testing.T) {
 		grs := runtime.NumGoroutine()
 		N := 10
@@ -535,4 +548,28 @@ func BenchmarkUnboundedChann(b *testing.B) {
 			}
 		})
 	})
+}
+
+func TestUnboundedChannRecvAfterClose(t *testing.T) {
+	var wg sync.WaitGroup
+	ch := chann.New[int]()
+
+	wg.Add(1)
+	c := 0
+	go func() {
+		for range ch.Out() {
+			c++
+		}
+		wg.Done()
+	}()
+
+	for i := 0; i < 2048; i++ {
+		ch.In() <- 42
+	}
+	ch.Close()
+
+	wg.Wait()
+	if c != 2048 {
+		t.Fatalf("not all elements are received after channel being closed, want %v got %v", 2048, c)
+	}
 }

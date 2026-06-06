@@ -6,7 +6,7 @@ a unified channel package in Go
 import "golang.design/x/chann"
 ```
 
-This package requires Go 1.18.
+This package requires Go 1.24.
 
 ## Basic Usage
 

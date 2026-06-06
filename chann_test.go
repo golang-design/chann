@@ -228,11 +228,13 @@ const internalCacheSize = 16 + 1<<10
 // This test checks that select acts on the state of the channels at one
 // moment in the execution, not over a smeared time window.
 // In the test, one goroutine does:
+//
 //	create c1, c2
 //	make c1 ready for receiving
 //	create second goroutine
 //	make c2 ready for receiving
 //	make c1 no longer ready for receiving (if possible)
+//
 // The second goroutine does a non-blocking select receiving from c1 and c2.
 // From the time the second goroutine is created, at least one of c1 and c2
 // is always ready for receiving, so the select in the second goroutine must
@@ -571,5 +573,23 @@ func TestUnboundedChannRecvAfterClose(t *testing.T) {
 	wg.Wait()
 	if c != 2048 {
 		t.Fatalf("not all elements are received after channel being closed, want %v got %v", 2048, c)
+	}
+}
+
+func TestUnboundedChannCap(t *testing.T) {
+	// An unbounded channel reports a capacity of -1, consistent with how
+	// a negative Cap option creates one. Buffered/unbuffered report their
+	// real capacity.
+	if got := chann.New[int]().Cap(); got != -1 {
+		t.Fatalf("unbounded Cap() = %v, want -1", got)
+	}
+	if got := chann.New[int](chann.Cap(-42)).Cap(); got != -1 {
+		t.Fatalf("unbounded Cap() = %v, want -1", got)
+	}
+	if got := chann.New[int](chann.Cap(0)).Cap(); got != 0 {
+		t.Fatalf("unbuffered Cap() = %v, want 0", got)
+	}
+	if got := chann.New[int](chann.Cap(8)).Cap(); got != 8 {
+		t.Fatalf("buffered Cap() = %v, want 8", got)
 	}
 }

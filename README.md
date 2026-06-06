@@ -14,7 +14,7 @@ Different types of channels:
 
 ```go
 ch := chann.New[int]()                  // unbounded, capacity unlimited
-ch := chann.New[func()](chann.Cap(0))   // unbufferd, capacity 0
+ch := chann.New[func()](chann.Cap(0))   // unbuffered, capacity 0
 ch := chann.New[string](chann.Cap(100)) // buffered,  capacity 100
 ```
 

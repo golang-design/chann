@@ -4,14 +4,14 @@
 //
 // Written by Changkun Ou <changkun.de>
 
-// Package chann providesa a unified channel package.
+// Package chann provides a unified channel package.
 //
 // The package is compatible with existing buffered and unbuffered
 // channels. For example, in Go, to create a buffered or unbuffered
 // channel, one uses built-in function `make` to create a channel:
 //
-// 	ch := make(chan int)     // unbuffered channel
-// 	ch := make(chan int, 42) // or buffered channel
+//	ch := make(chan int)     // unbuffered channel
+//	ch := make(chan int, 42) // or buffered channel
 //
 // However, all these channels have a finite capacity for caching, and
 // it is impossible to create a channel with unlimited capacity, namely,
@@ -20,24 +20,24 @@
 // This package provides the ability to create all possible types of
 // channels. To create an unbuffered or a buffered channel:
 //
-// 	ch := chann.New[int](chann.Cap(0))  // unbuffered channel
-// 	ch := chann.New[int](chann.Cap(42)) // or buffered channel
+//	ch := chann.New[int](chann.Cap(0))  // unbuffered channel
+//	ch := chann.New[int](chann.Cap(42)) // or buffered channel
 //
 // More importantly, when the capacity of the channel is unspecified,
 // or provided as negative values, the created channel is an unbounded
 // channel:
 //
-// 	ch := chann.New[int]()               // unbounded channel
-// 	ch := chann.New[int](chann.Cap(-42)) // or unbounded channel
+//	ch := chann.New[int]()               // unbounded channel
+//	ch := chann.New[int](chann.Cap(-42)) // or unbounded channel
 //
 // Furthermore, all channels provides methods to send (In()),
 // receive (Out()), and close (Close()).
 //
 // Note that to close a channel, must use Close() method instead of the
-// language built-in method
-// Two additional methods: ApproxLen and Cap returns the current status
-// of the channel: an approximation of the current length of the channel,
-// as well as the current capacity of the channel.
+// language built-in method.
+// Two additional methods: Len and Cap returns the current status of the
+// channel: an approximation of the current length of the channel, as
+// well as the current capacity of the channel.
 //
 // See https://golang.design/research/ultimate-channel to understand
 // the motivation of providing this package and the possible use cases
@@ -90,9 +90,9 @@ type Chann[T any] struct {
 // By default, or without specification, the function returns an unbounded
 // channel with unlimited capacity.
 //
-// 	ch := chann.New[float64]()
-// 	// or
-//  ch := chann.New[float64](chann.Cap(-1))
+//	ch := chann.New[float64]()
+//	// or
+//	ch := chann.New[float64](chann.Cap(-1))
 //
 // If the chann.Cap specified a non-negative integer, the returned channel
 // is either unbuffered (0) or buffered (positive).
@@ -255,7 +255,8 @@ func (ch *Chann[T]) isClosed() bool {
 // Len returns an approximation of the length of the channel.
 //
 // Note that in a concurrent scenario, the returned length of a channel
-// may never be accurate. Hence the function is named with an Approx prefix.
+// may never be accurate. Hence the result should only be treated as an
+// approximation.
 func (ch *Chann[T]) Len() int {
 	switch ch.cfg.typ {
 	case buffered, unbuffered:
@@ -265,13 +266,15 @@ func (ch *Chann[T]) Len() int {
 	}
 }
 
-// Cap returns the capacity of the channel.
+// Cap returns the capacity of the channel. For an unbounded channel it
+// returns -1, which is consistent with how a negative Cap option creates
+// an unbounded channel.
 func (ch *Chann[T]) Cap() int {
 	switch ch.cfg.typ {
 	case buffered, unbuffered:
 		return cap(ch.in)
 	default:
-		return int(atomic.LoadInt64(&ch.cfg.cap)) + cap(ch.in) + cap(ch.out)
+		return -1
 	}
 }
 

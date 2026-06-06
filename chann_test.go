@@ -552,6 +552,26 @@ func BenchmarkUnboundedChann(b *testing.B) {
 	})
 }
 
+// BenchmarkUnboundedChannBacklog measures sustained throughput at a
+// bounded backlog: prefill D elements, then push/pop in lockstep so the
+// backlog stays ~D while the live window slides over the operations. This
+// is the scenario where the internal ring buffer matters — it should
+// report 0 allocs/op after warmup, whereas a sliding slice queue churns
+// the garbage collector by repeatedly reallocating the live window.
+func BenchmarkUnboundedChannBacklog(b *testing.B) {
+	const D = 1 << 12
+	c := chann.New[int]()
+	for i := 0; i < D; i++ {
+		c.In() <- i
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		c.In() <- i
+		<-c.Out()
+	}
+}
+
 func TestUnboundedChannRecvAfterClose(t *testing.T) {
 	var wg sync.WaitGroup
 	ch := chann.New[int]()
@@ -574,6 +594,36 @@ func TestUnboundedChannRecvAfterClose(t *testing.T) {
 	if c != 2048 {
 		t.Fatalf("not all elements are received after channel being closed, want %v got %v", 2048, c)
 	}
+}
+
+func TestUnboundedChannRingWrap(t *testing.T) {
+	// Exercises the internal ring buffer's grow and wrap-around paths while
+	// asserting strict FIFO order — the one place a circular buffer can
+	// reorder elements. Phase 1 grows the backlog past the initial
+	// capacity; phase 2 sustains a steady backlog so the head and tail
+	// wrap around the backing array many times; phase 3 drains the rest.
+	ch := chann.New[int]()
+	next, expect := 0, 0
+	push := func() { ch.In() <- next; next++ }
+	pop := func() {
+		v := <-ch.Out()
+		if v != expect {
+			t.Fatalf("FIFO violation: got %d want %d", v, expect)
+		}
+		expect++
+	}
+
+	for i := 0; i < 5000; i++ { // grow past initial cap (1<<10)
+		push()
+	}
+	for i := 0; i < 200000; i++ { // steady backlog -> head/tail wrap
+		push()
+		pop()
+	}
+	for expect < next { // drain remaining backlog in order
+		pop()
+	}
+	ch.Close()
 }
 
 func TestUnboundedChannCap(t *testing.T) {

@@ -172,9 +172,7 @@ func (ch *Chann[T]) Close() {
 // the Chann reachable forever and the cleanup registered in New would
 // never fire. It only operates on the extracted channels and config.
 func unboundedProcessing[T any](in, out chan T, closed, released chan struct{}, cfg *config) {
-	var nilT T
-
-	q := make([]T, 0, 1<<10)
+	q := newRing[T]()
 	for {
 		select {
 		case e, ok := <-in:
@@ -182,32 +180,29 @@ func unboundedProcessing[T any](in, out chan T, closed, released chan struct{}, 
 				panic("chann: send-only channel ch.In() closed unexpectedly")
 			}
 			atomic.AddInt64(&cfg.len, 1)
-			q = append(q, e)
+			q.push(e)
 		case <-closed:
 			unboundedTerminate(in, out, closed, released, q)
 			return
 		}
 
-		for len(q) > 0 {
+		for q.len() > 0 {
 			select {
-			case out <- q[0]:
+			case out <- q.peek():
 				atomic.AddInt64(&cfg.len, -1)
-				q[0] = nilT
-				q = q[1:]
+				q.pop()
 			case e, ok := <-in:
 				if !ok {
 					panic("chann: send-only channel ch.In() closed unexpectedly")
 				}
 				atomic.AddInt64(&cfg.len, 1)
-				q = append(q, e)
+				q.push(e)
 			case <-closed:
 				unboundedTerminate(in, out, closed, released, q)
 				return
 			}
 		}
-		if cap(q) < 1<<5 {
-			q = make([]T, 0, 1<<10)
-		}
+		q.shrink()
 	}
 }
 
@@ -220,18 +215,15 @@ func unboundedProcessing[T any](in, out chan T, closed, released chan struct{}, 
 // no receiver, the send would block forever; the released signal (closed
 // by the cleanup once the owning Chann is garbage collected) lets the
 // goroutine terminate instead of leaking.
-func unboundedTerminate[T any](in, out chan T, closed, released chan struct{}, q []T) {
-	var nilT T
-
+func unboundedTerminate[T any](in, out chan T, closed, released chan struct{}, q *ring[T]) {
 	close(in)
 	for e := range in {
-		q = append(q, e)
+		q.push(e)
 	}
-	for len(q) > 0 {
+	for q.len() > 0 {
 		select {
-		case out <- q[0]:
-			q[0] = nilT // de-reference earlier to help GC
-			q = q[1:]
+		case out <- q.peek():
+			q.pop() // pop zeroes the slot to help GC
 		case <-released:
 			goto final
 		}
@@ -289,4 +281,75 @@ const (
 type config struct {
 	typ      chanType
 	len, cap int64
+}
+
+// ringInitCap is the initial (and minimum) capacity of the unbounded
+// channel's backlog buffer. It must be a power of two so that index
+// wrap-around can use a bitmask instead of a modulo.
+const ringInitCap = 1 << 10
+
+// ring is a growable circular buffer used as the backlog of an unbounded
+// channel. Unlike a plain slice with q = q[1:], popped slots are reused
+// as the head and tail wrap around the backing array, so sustained
+// throughput at a bounded backlog does not repeatedly reallocate and copy
+// the live window — keeping garbage collector pressure flat. The backing
+// array only grows (by doubling) when the buffer is genuinely full, and
+// shrinks back to ringInitCap once fully drained.
+//
+// len(buf) is always a power of two, so (i & (len(buf)-1)) advances an
+// index with wrap-around.
+type ring[T any] struct {
+	buf  []T
+	head int // index of the next element to read
+	tail int // index of the next slot to write
+	size int // number of elements currently buffered
+}
+
+func newRing[T any]() *ring[T] {
+	return &ring[T]{buf: make([]T, ringInitCap)}
+}
+
+func (r *ring[T]) len() int { return r.size }
+
+// peek returns the element at the head. It must not be called when empty.
+func (r *ring[T]) peek() T { return r.buf[r.head] }
+
+// push appends v to the tail, growing the backing array if full.
+func (r *ring[T]) push(v T) {
+	if r.size == len(r.buf) {
+		r.grow()
+	}
+	r.buf[r.tail] = v
+	r.tail = (r.tail + 1) & (len(r.buf) - 1)
+	r.size++
+}
+
+// pop removes the head element. It zeroes the vacated slot so the element
+// no longer keeps any referenced memory alive. It must not be called when
+// empty.
+func (r *ring[T]) pop() {
+	var zero T
+	r.buf[r.head] = zero
+	r.head = (r.head + 1) & (len(r.buf) - 1)
+	r.size--
+}
+
+// grow doubles the backing array and re-lays the elements out in FIFO
+// order starting at index 0.
+func (r *ring[T]) grow() {
+	buf := make([]T, len(r.buf)<<1)
+	n := copy(buf, r.buf[r.head:])
+	copy(buf[n:], r.buf[:r.tail])
+	r.head = 0
+	r.tail = r.size
+	r.buf = buf
+}
+
+// shrink resets an empty buffer that has grown beyond its initial size
+// back to ringInitCap, releasing the memory retained after a burst.
+func (r *ring[T]) shrink() {
+	if r.size == 0 && len(r.buf) > ringInitCap {
+		r.buf = make([]T, ringInitCap)
+		r.head, r.tail = 0, 0
+	}
 }
